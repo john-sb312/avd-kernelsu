@@ -121,7 +121,7 @@ jobs:
           fi
 
       - name: Fix Less Than 6.6.50 Builds
-        if: ${{ steps.parse.outputs.android_version == 'android15' && steps.parse.outputs.kernel_version == '6.6' }}
+        if: ${{ steps.parse.outputs.android_version == 'android15' && steps.parse.outputs.kernel_version == '6.6' && fromJSON(steps.extract.outputs.sublevel) < 50 }}
         working-directory: ${{ github.workspace }}/kernel/common
         run: |
           if ! grep -qxF '#include <trace/hooks/fs.h>' ./fs/namespace.c; then
@@ -133,6 +133,24 @@ jobs:
         with:
           ksu_variant: ${{ inputs.ksu_variant }}
           ksu_commit: ${{ inputs.ksu_commit }}
+
+      - name: Enable KernelSU x86_64 Syscall Dispatcher
+        if: ${{ inputs.arch == 'x86_64' }}
+        run: |
+          # KernelSU >= 3.3.0 refuses to compile on x86_64 unless either
+          # CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER is enabled or the kernel
+          # carries the X86_FEATURE_INDIRECT_SAFE patch set. Enable the
+          # built-in dispatcher patching when the KSU source provides it.
+          # Runs before configure-kernel so the option is copied into the
+          # in-tree gki.fragment and committed by clean-flags.
+          FRAG="$GITHUB_WORKSPACE/gki.fragment"
+          KSU_KCONFIG="$GITHUB_WORKSPACE/kernel/common/drivers/kernelsu/Kconfig"
+          if grep -q '^config KSU_X86_PATCH_SYSCALL_DISPATCHER$' "$KSU_KCONFIG" 2>/dev/null; then
+            echo "CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER=y" >> "$FRAG"
+            echo "Enabled CONFIG_KSU_X86_PATCH_SYSCALL_DISPATCHER=y (KernelSU >= 3.3.0 x86_64)"
+          else
+            echo "KSU_X86_PATCH_SYSCALL_DISPATCHER not in KSU Kconfig - skipping (KernelSU < 3.3.0)"
+          fi
 
       - name: Configure Kernel Options
         uses: ./.github/actions/configure-kernel

@@ -16,7 +16,8 @@ runs:
 
         # Only add configs that exist in Kconfig - check before adding
         KERNEL_SRC="${{ github.workspace }}/kernel/common"
-        echo "# AVD virtio built-in configs" > "$FRAG"
+        # Append (do not truncate): earlier steps (setup-ksu) already added CONFIG_KSU=y
+        echo "# AVD virtio built-in configs" >> "$FRAG"
 
         # Check each config exists in Kconfig before adding to fragment
         for cfg in \
@@ -44,7 +45,9 @@ runs:
         ; do
           # Strip CONFIG_ prefix to get Kconfig symbol name
           SYM="${cfg#CONFIG_}"
-          if grep -rq "^config $SYM$" "$KERNEL_SRC" 2>/dev/null; then
+          # Match "config SYM" and "menuconfig SYM": 6.12 declares GOLDFISH as
+          # a menuconfig, while older trees also have a "config GOLDFISH" alias.
+          if grep -rEq "^(menuconfig|config) $SYM$" "$KERNEL_SRC" 2>/dev/null; then
             echo "${cfg}=y" >> "$FRAG"
             echo "  Added: ${cfg}=y"
           else
