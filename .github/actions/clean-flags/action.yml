@@ -20,12 +20,40 @@ runs:
           # Remove rust_binder.ko from module_outs (Android 16)
           find . -type f \( -name "*.bazel" -o -name "*.bzl" -o -name "BUILD" \) -exec grep -l "rust_binder" {} \; -exec sed -i '/rust_binder/d' {} \;
 
+          # AVD build forces virtio/goldfish drivers built-in via gki.fragment,
+          # so GKI/generic module_outs still expect .ko files that are no longer
+          # produced (fatal on Android 15/16: "Unable to find virtio_blk.ko").
+          # Drop those expectations for the built-in modules.
+          if [ -f ./common/modules.bzl ]; then
+            for mod in \
+              drivers/block/virtio_blk.ko \
+              drivers/char/virtio_console.ko \
+              drivers/virtio/virtio_balloon.ko \
+              drivers/virtio/virtio_pci.ko \
+              drivers/virtio/virtio_pci_legacy_dev.ko \
+              drivers/virtio/virtio_pci_modern_dev.ko \
+              net/vmw_vsock/vmw_vsock_virtio_transport.ko \
+            ; do
+              sed -i "\#\"${mod}\"#d" ./common/modules.bzl
+            done
+          fi
+
+          # Same for the virtual-device module set (the AVD/emulator modules).
+          VD_BUILD=./common-modules/virtual-device/BUILD.bazel
+          if [ -f "$VD_BUILD" ]; then
+            sed -i -E '/^_VIRT_COMMON_MODULES = \[/,/^\]/ { /"(failover|net_failover|virtio_blk|virtio_console|virtio_balloon|virtio_pci|virtio_pci_legacy_dev|virtio_pci_modern_dev|virtio-gpu|virtio-rng|virtio_dma_buf|virtio_input|virtio_net|virtio_snd|vmw_vsock_virtio_transport)\.ko",/d }' "$VD_BUILD"
+            sed -i -E '/^_VIRT_AARCH64_MODULES = \[/,/^\]/ { /"virtio_mmio\.ko",/d }' "$VD_BUILD"
+          fi
+
           # Disable KMI symbol list strict mode
           find . -type f \( -name "*.bazel" -o -name "*.bzl" -o -name "BUILD" \) -exec sed -i 's/kmi_symbol_list_strict_mode\s*=\s*True/kmi_symbol_list_strict_mode = False/g' {} \;
         fi
 
-        cd ${{ github.workspace }}/kernel/common
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git add .
-        git commit -m "Clean dirty flags and ABI exports" || true
+        # Commit in every modified repo (common + virtual-device module repo)
+        for dir in "${{ github.workspace }}/kernel/common" "${{ github.workspace }}/kernel/common-modules/virtual-device"; do
+          if [ -e "$dir/.git" ]; then
+            ( cd "$dir" && git add . && git commit -m "Clean dirty flags and ABI exports" ) || true
+          fi
+        done
